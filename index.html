@@ -2560,38 +2560,77 @@ function confirmScanGasto() {
   const [mStr, yStr] = document.getElementById('scan-month-sel').value.split('_');
   const month = parseInt(mStr), year = parseInt(yStr);
   const isMP = r.movimientos && Array.isArray(r.movimientos);
+
   if (isMP) {
     const activos = r.movimientos.filter(m => !m.ignorar);
     if (!activos.length) { alert('No hay movimientos para registrar.'); closeModals(); return; }
+
     activos.forEach(m => {
       const isIncome = m.tipo === 'ingreso';
-      const numCuotas = (!isIncome && m.medio_pago === 'credito' && m.cuotas > 1) ? m.cuotas : 1;
-      const tipoTxn = numCuotas > 1 ? 'Cuotas' : (m.medio_pago === 'credito' ? 'Variable' : 'Variable');
-      for (let i = 0; i < numCuotas; i++) {
-        const imp = isIncome
-          ? calcImpactMonth(m.fecha, 'debito', 0)
-          : calcImpactMonth(m.fecha, m.medio_pago || 'debito', i);
+      const totalCuotas = m.cuotas > 1 ? m.cuotas : 1;
+      const cuotaActual = m.cuota_actual || 1;
+      const cuotasRestantes = totalCuotas - cuotaActual + 1; // incluye la actual
+
+      // Mes base de impacto: mes_impacto del JSON (ya calculado = mes de pago de cuota actual)
+      const baseM = m.mes_impacto !== undefined ? m.mes_impacto : month;
+      const baseY = m.año_impacto !== undefined ? m.año_impacto : year;
+
+      if (totalCuotas === 1) {
+        // Sin cuotas — transacción simple
         state.transactions.push({
-          id: uid(),
-          desc: numCuotas > 1 ? `${m.desc} (${i+1}/${numCuotas})` : m.desc,
-          cat: m.cat || 'otros',
-          amount: Math.round(m.monto / numCuotas),
-          type: tipoTxn,
-          month: imp.month,
-          year: imp.year,
+          id: uid(), desc: m.desc, cat: m.cat || 'otros',
+          amount: m.monto, type: 'Variable',
+          month: baseM, year: baseY,
           flow: isIncome ? 'ingreso' : 'gasto',
-          cuotas: numCuotas,
-          cuota: i + 1
+          cuotas: 1, cuota: 1,
+          medio_pago: m.medio_pago || 'credito',
+          fuente: 'banco'
         });
+      } else {
+        // Con cuotas — generar desde cuota actual hasta la última
+        const montoCuota = Math.round(m.monto); // monto ya es por cuota
+        for (let i = 0; i < cuotasRestantes; i++) {
+          const d = new Date(baseY, baseM + i, 1);
+          const nroCuota = cuotaActual + i;
+          // Verificar que no existe ya esta cuota
+          const yaExiste = state.transactions.some(t =>
+            t.desc && t.desc.includes(m.desc) &&
+            t.month === d.getMonth() &&
+            t.year === d.getFullYear() &&
+            t.amount === montoCuota
+          );
+          if (!yaExiste) {
+            state.transactions.push({
+              id: uid(),
+              desc: m.desc + ' (' + nroCuota + '/' + totalCuotas + ')',
+              cat: m.cat || 'otros',
+              amount: montoCuota,
+              type: 'Cuotas',
+              month: d.getMonth(),
+              year: d.getFullYear(),
+              flow: 'gasto',
+              cuotas: totalCuotas,
+              cuota: nroCuota,
+              medio_pago: m.medio_pago || 'credito',
+              fuente: 'banco'
+            });
+          }
+        }
       }
     });
   } else {
     if (!r || !r.total) { alert('No se detectó monto. Usá el botón + para cargar manualmente.'); closeModals(); return; }
-    state.transactions.push({id:uid(), desc:r.comercio||'Supermercado', cat:r.categoria||'super', amount:Math.round(r.total), type:'Variable', month, year, flow:'gasto', cuotas:1, cuota:1});
+    state.transactions.push({
+      id:uid(), desc:r.comercio||'Supermercado', cat:r.categoria||'super',
+      amount:Math.round(r.total), type:'Variable', month, year,
+      flow:'gasto', cuotas:1, cuota:1
+    });
   }
+
   saveTxns();
   closeModals();
-  state.currentM = month; state.currentY = year;
+  state.currentM = baseM !== undefined ? baseM : month;
+  state.currentY = baseY !== undefined ? baseY : year;
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
   document.getElementById('s-dash').classList.add('active');
