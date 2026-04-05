@@ -2492,8 +2492,11 @@ function calcImpactMonth(fechaStr, medioP, cuotaOffset) {
 }
 
 function showScanResult() {
-  document.getElementById('scan-state-loading').style.display = 'none';
-  document.getElementById('scan-state-result').style.display = 'block';
+  // Compatibilidad con estructura antigua y nueva del modal
+  const loadingEl = document.getElementById('scan-state-loading');
+  const resultEl = document.getElementById('scan-state-result');
+  if (loadingEl) loadingEl.style.display = 'none';
+  if (resultEl) resultEl.style.display = 'block';
   const r = scanResult;
   const isMP = r.movimientos && Array.isArray(r.movimientos);
   let html = '';
