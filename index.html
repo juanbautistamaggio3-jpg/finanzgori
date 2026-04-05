@@ -1771,6 +1771,8 @@ function showAllTxns() {
   renderAllTxns();
 }
 
+let alltxnsExpanded = null; // id del row expandido
+
 function renderAllTxns() {
   const searchVal = (document.getElementById('alltxns-search')?.value || '').toLowerCase();
   const filterCat = document.getElementById('alltxns-cat')?.value || 'all';
@@ -1778,8 +1780,6 @@ function renderAllTxns() {
   const filterMes = document.getElementById('alltxns-mes')?.value || 'all';
 
   let txns = [...state.transactions];
-
-  // Filtros
   if (filterCat !== 'all') txns = txns.filter(t => t.cat === filterCat);
   if (filterTipo === 'gasto') txns = txns.filter(t => t.flow === 'gasto');
   if (filterTipo === 'ingreso') txns = txns.filter(t => t.flow === 'ingreso');
@@ -1788,24 +1788,23 @@ function renderAllTxns() {
     txns = txns.filter(t => t.year === parseInt(y) && t.month === parseInt(m));
   }
   if (searchVal) txns = txns.filter(t => t.desc.toLowerCase().includes(searchVal));
-
-  // Ordenar más reciente primero
   txns.sort((a,b) => (b.year*12+b.month) - (a.year*12+a.month) || b.amount - a.amount);
 
   const el = document.getElementById('alltxns-list');
   if (!el) return;
 
-  // Totales
   const totalGastos = txns.filter(t=>t.flow==='gasto').reduce((s,t)=>s+t.amount,0);
   const totalIngresos = txns.filter(t=>t.flow==='ingreso').reduce((s,t)=>s+t.amount,0);
   document.getElementById('alltxns-total-g').textContent = fmt(totalGastos);
   document.getElementById('alltxns-total-i').textContent = fmt(totalIngresos);
-  document.getElementById('alltxns-count').textContent = txns.length + ' transacciones';
+  document.getElementById('alltxns-count').textContent = txns.length;
 
   if (txns.length === 0) {
     el.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">Sin resultados</div>';
     return;
   }
+
+  el.innerHTML = '';
 
   // Agrupar por mes
   const grupos = {};
@@ -1815,30 +1814,138 @@ function renderAllTxns() {
     grupos[k].push(t);
   });
 
-  el.innerHTML = Object.keys(grupos).sort((a,b) => {
-    const [ay,am] = a.split('-'); const [by,bm] = b.split('-');
-    return (parseInt(by)*12+parseInt(bm)) - (parseInt(ay)*12+parseInt(am));
-  }).map(k => {
+  Object.keys(grupos).sort((a,b) => {
+    const [ay,am]=a.split('-'); const [by,bm]=b.split('-');
+    return (parseInt(by)*12+parseInt(bm))-(parseInt(ay)*12+parseInt(am));
+  }).forEach(k => {
     const [y, m] = k.split('-');
     const list = grupos[k];
     const mesTotal = list.filter(t=>t.flow==='gasto').reduce((s,t)=>s+t.amount,0);
-    return '<div style="padding:10px 16px 4px;display:flex;justify-content:space-between;align-items:center;background:var(--s2);border-bottom:1px solid var(--border);">' +
-      '<span style="font-family:var(--font-display);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);">' + MONTH_NAMES[parseInt(m)] + ' ' + y + '</span>' +
-      '<span style="font-size:11px;color:var(--red);">' + fmt(mesTotal) + '</span>' +
-      '</div>' +
-      list.map(t => {
-        const cat = CATS.find(c=>c.id===t.cat)||{icon:'📦',color:'#666',name:t.cat};
-        const isIncome = t.flow==='ingreso';
-        return '<div class="txn-row" onclick="openTxnEdit(\'' + t.id + '\')">' +
-          '<div class="txn-ico" style="background:' + cat.color + '20;color:' + cat.color + ';">' + (isIncome?'💰':cat.icon) + '</div>' +
-          '<div class="txn-info">' +
-            '<div class="txn-name">' + t.desc + '</div>' +
-            '<div class="txn-cat">' + cat.name + ' · ' + MONTH_NAMES[t.month].slice(0,3) + ' ' + t.year + (t.cuotas>1?' · '+t.cuota+'/'+t.cuotas:'') + '</div>' +
-          '</div>' +
-          '<div class="txn-amt ' + (isIncome?'income':'') + '">' + (isIncome?'+':'-') + fmt(t.amount) + '</div>' +
+
+    // Header mes
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:8px 16px;display:flex;justify-content:space-between;align-items:center;background:var(--s2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:2;';
+    header.innerHTML = '<span style="font-family:var(--font-display);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);">' + MONTH_NAMES[parseInt(m)] + ' ' + y + '</span>' +
+      '<span style="font-size:11px;color:var(--red);">' + fmt(mesTotal) + '</span>';
+    el.appendChild(header);
+
+    list.forEach(t => {
+      const cat = CATS.find(c=>c.id===t.cat)||{icon:'📦',color:'#666',name:'Otros'};
+      const isIncome = t.flow==='ingreso';
+      const isExpanded = alltxnsExpanded === t.id;
+
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'border-bottom:1px solid var(--border);' + (isExpanded ? 'background:var(--s2);' : '');
+
+      // Fila principal
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 16px;cursor:pointer;';
+      row.innerHTML =
+        '<div style="width:36px;height:36px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px;background:' + cat.color + '20;color:' + cat.color + ';">' + (isIncome?'💰':cat.icon) + '</div>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + t.desc + '</div>' +
+          '<div style="font-size:11px;color:var(--muted);margin-top:1px;">' + cat.name + ' · ' + MONTH_NAMES[t.month].slice(0,3) + ' ' + t.year + '</div>' +
+        '</div>' +
+        '<div style="text-align:right;flex-shrink:0;">' +
+          '<div style="font-family:var(--font-display);font-size:14px;font-weight:700;color:' + (isIncome?'var(--green)':'var(--red)') + ';">' + (isIncome?'+':'-') + fmt(t.amount) + '</div>' +
+          '<div style="font-size:11px;color:var(--muted);">' + (isExpanded ? '▲' : '✏️') + '</div>' +
         '</div>';
-      }).join('');
-  }).join('');
+
+      row.onclick = () => {
+        alltxnsExpanded = isExpanded ? null : t.id;
+        renderAllTxns();
+      };
+
+      wrapper.appendChild(row);
+
+      // Panel de edición inline
+      if (isExpanded) {
+        const panel = document.createElement('div');
+        panel.style.cssText = 'padding:0 16px 12px;';
+
+        // Descripción
+        const descInp = document.createElement('input');
+        descInp.type = 'text';
+        descInp.className = 'form-input';
+        descInp.value = t.desc;
+        descInp.style.cssText = 'font-size:13px;padding:8px 12px;margin-bottom:8px;';
+        descInp.placeholder = 'Descripción...';
+        panel.appendChild(descInp);
+
+        // Fila: cat + tipo
+        const row2 = document.createElement('div');
+        row2.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
+
+        const catSel = document.createElement('select');
+        catSel.className = 'form-input';
+        catSel.style.cssText = 'font-size:12px;padding:7px 8px;cursor:pointer;flex:1;';
+        CATS.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = c.icon + ' ' + c.name;
+          if (c.id === t.cat) opt.selected = true;
+          catSel.appendChild(opt);
+        });
+
+        const tipoSel = document.createElement('select');
+        tipoSel.className = 'form-input';
+        tipoSel.style.cssText = 'font-size:12px;padding:7px 8px;cursor:pointer;width:auto;flex-shrink:0;';
+        ['gasto','ingreso'].forEach(tp => {
+          const opt = document.createElement('option');
+          opt.value = tp;
+          opt.textContent = tp === 'gasto' ? '💸 Gasto' : '💰 Ingreso';
+          if (tp === t.flow) opt.selected = true;
+          tipoSel.appendChild(opt);
+        });
+
+        row2.appendChild(catSel);
+        row2.appendChild(tipoSel);
+        panel.appendChild(row2);
+
+        // Botones guardar / eliminar
+        const btns = document.createElement('div');
+        btns.style.cssText = 'display:flex;gap:8px;';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'submit-btn';
+        saveBtn.style.cssText = 'flex:1;margin:0;padding:10px;font-size:13px;';
+        saveBtn.textContent = '✓ Guardar';
+        saveBtn.onclick = (e) => {
+          e.stopPropagation();
+          const newDesc = descInp.value.trim() || t.desc;
+          const newCat = catSel.value;
+          const newFlow = tipoSel.value;
+          state.transactions = state.transactions.map(tx =>
+            tx.id === t.id ? {...tx, desc: newDesc, cat: newCat, flow: newFlow} : tx
+          );
+          saveTxns();
+          alltxnsExpanded = null;
+          renderAllTxns();
+          showToast('✓ Guardado');
+        };
+
+        const delBtn = document.createElement('button');
+        delBtn.style.cssText = 'padding:10px 16px;background:var(--red-dim);border:1.5px solid var(--red);border-radius:12px;color:var(--red);font-size:16px;cursor:pointer;flex-shrink:0;';
+        delBtn.textContent = '🗑';
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          if (confirm('¿Eliminar "' + t.desc + '"?')) {
+            state.transactions = state.transactions.filter(tx => tx.id !== t.id);
+            saveTxns();
+            alltxnsExpanded = null;
+            renderAllTxns();
+          }
+        };
+
+        btns.appendChild(saveBtn);
+        btns.appendChild(delBtn);
+        panel.appendChild(btns);
+        wrapper.appendChild(panel);
+      }
+
+      el.appendChild(wrapper);
+    });
+  });
 }
 
 // ════════════════════════════════════════════════
@@ -2321,19 +2428,44 @@ function processPastedJSON() {
   let raw = document.getElementById('scan-paste-input').value.trim();
   if (!raw) return;
   try {
-    // Limpiar markdown, espacios raros y caracteres de control
     raw = raw.replace(/```json|```/g,'').trim();
-    // Encontrar el JSON válido dentro del texto
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
-    if (start === -1 || end === -1) throw new Error('No se encontró JSON');
+    if (start === -1 || end === -1) throw new Error('No se encontro JSON');
     raw = raw.slice(start, end + 1);
     scanResult = JSON.parse(raw);
+
+    // Si viene de extracto bancario, detectar duplicados y MERPAGO
+    if (scanResult.movimientos && Array.isArray(scanResult.movimientos)) {
+      scanResult.movimientos.forEach(m => {
+        const descLow = (m.desc || '').toLowerCase();
+        // Ignorar pagos MERPAGO — ya están importados desde MP
+        if (descLow.includes('merpago') || descLow.includes('mercado pago') || descLow.includes('mp*')) {
+          m.ignorar = true;
+          m.nota = 'Ya en MP - ignorado';
+          return;
+        }
+        // Detectar posible duplicado por monto y mes
+        if (m.fecha) {
+          const d = new Date(m.fecha + 'T00:00:00');
+          const chkM = m.mes_impacto !== undefined ? m.mes_impacto : d.getMonth();
+          const chkY = m.año_impacto !== undefined ? m.año_impacto : d.getFullYear();
+          const dup = state.transactions.find(t =>
+            t.amount === m.monto && t.month === chkM && t.year === chkY
+          );
+          if (dup) {
+            m.posible_dup = true;
+            m.nota = 'Posible duplicado: ' + dup.desc;
+          }
+        }
+      });
+    }
+
     document.getElementById('scan-step1').style.display = 'none';
     document.getElementById('scan-step2').style.display = 'block';
     showScanResult();
   } catch(e) {
-    alert('Error al leer el JSON: ' + e.message + '\nBorrá todo y pegá de nuevo solo el JSON.');
+    alert('Error: ' + e.message + '. Borra todo y pega de nuevo solo el JSON.');
   }
 }
 
@@ -2365,26 +2497,46 @@ function showScanResult() {
   const r = scanResult;
   const isMP = r.movimientos && Array.isArray(r.movimientos);
   let html = '';
+
   if (isMP) {
     const activos = r.movimientos.filter(m => !m.ignorar);
     const ignorados = r.movimientos.filter(m => m.ignorar);
-    html += `<div style="padding:10px 16px 6px;font-size:12px;color:var(--muted);">📱 <strong style="color:var(--text);">Mercado Pago</strong> · ${activos.length} movimientos · <span style="color:var(--muted2);">${ignorados.length} ignorados (tarjeta/ahorro)</span></div>`;
+    const duplicados = activos.filter(m => m.posible_dup);
+    html += '<div style="padding:10px 16px 6px;font-size:12px;color:var(--muted);">' +
+      '<strong style="color:var(--text);">' + activos.length + ' movimientos</strong> · ' +
+      ignorados.length + ' ignorados' +
+      (duplicados.length > 0 ? ' · <span style="color:var(--yellow);">⚠️ ' + duplicados.length + ' posibles duplicados</span>' : '') +
+      '</div>';
     activos.forEach(m => {
       const cat = CATS.find(c => c.id === m.cat) || CATS.find(c=>c.id==='otros');
       const isIncome = m.tipo === 'ingreso';
-      const imp = calcImpactMonth(m.fecha, m.medio_pago, 0);
-      const impLabel = isIncome ? '' : (m.medio_pago === 'credito'
-        ? ` · 💳 ${m.cuotas > 1 ? m.cuotas+'c desde ' : ''}${MONTH_NAMES[imp.month]}`
-        : ` · 💵 ${MONTH_NAMES[imp.month]}`);
-      html += `<div class="scan-result-item"><div><div class="scan-result-desc">${m.desc}</div><div class="scan-result-cat">${cat.icon} ${cat.name}${impLabel}</div></div><div class="scan-result-amt" style="color:${isIncome?'var(--green)':'var(--red)'};">${isIncome?'+':'-'}${fmt(m.monto)}</div></div>`;
+      const medioIcon = m.medio_pago === 'credito' ? '💳' : '💵';
+      let impLabel = '';
+      if (m.mes_impacto !== undefined) {
+        const fechaD = new Date((m.fecha||'2026-01-01') + 'T00:00:00');
+        if (m.mes_impacto !== fechaD.getMonth() || m.año_impacto !== fechaD.getFullYear()) {
+          impLabel = ' → ' + MONTH_NAMES[m.mes_impacto].slice(0,3) + ' ' + m.año_impacto;
+        }
+      }
+      const dupBg = m.posible_dup ? 'background:rgba(255,193,61,0.08);' : '';
+      html += '<div class="scan-result-item" style="' + dupBg + '">' +
+        '<div><div class="scan-result-desc">' + m.desc + '</div>' +
+        '<div class="scan-result-cat">' + cat.icon + ' ' + cat.name + ' · ' + medioIcon + impLabel +
+        (m.posible_dup ? ' · ⚠️ ' + (m.nota||'posible dup') : '') + '</div></div>' +
+        '<div class="scan-result-amt" style="color:' + (isIncome?'var(--green)':'var(--red)') + ';">' +
+        (isIncome?'+':'-') + fmt(m.monto) + '</div></div>';
     });
-    if (r.total_gastos) html += `<div style="padding:10px 16px;display:flex;justify-content:space-between;border-top:1px solid var(--border);"><span style="font-size:12px;color:var(--muted);">Total gastos</span><span style="font-family:var(--font-display);font-weight:800;color:var(--red);">${fmt(r.total_gastos)}</span></div>`;
+    if (ignorados.length > 0) {
+      html += '<div style="padding:6px 16px;font-size:11px;color:var(--muted2);border-top:1px solid var(--border);">🚫 Ignorados: ' + ignorados.map(m=>m.desc).join(', ') + '</div>';
+    }
+    if (r.total_gastos) html += '<div style="padding:10px 16px;display:flex;justify-content:space-between;border-top:1px solid var(--border);"><span style="font-size:12px;color:var(--muted);">Total gastos</span><span style="font-family:var(--font-display);font-weight:800;color:var(--red);">' + fmt(r.total_gastos) + '</span></div>';
   } else {
     const catMain = CATS.find(c => c.id === r.categoria) || CATS.find(c => c.id === 'super');
-    html = `<div class="scan-result-item" style="background:var(--s2);"><div><div class="scan-result-desc" style="font-size:15px;font-weight:700;">${r.comercio || 'Supermercado'}</div><div class="scan-result-cat">${catMain.icon} ${catMain.name} · Total ticket</div></div><div class="scan-result-amt" style="font-size:17px;">${r.total ? fmt(r.total) : '—'}</div></div>`;
-    if (r.items && r.items.length > 0) r.items.forEach(item => { const catItem = CATS.find(c => c.id === item.cat) || catMain; html += `<div class="scan-result-item"><div><div class="scan-result-desc">${item.desc}</div><div class="scan-result-cat">${catItem.icon} ${catItem.name}</div></div><div class="scan-result-amt" style="color:var(--muted);">${fmt(item.monto)}</div></div>`; });
-    if (r.notas) html += `<div style="padding:8px 16px;font-size:11px;color:var(--muted);">📝 ${r.notas}</div>`;
+    html = '<div class="scan-result-item" style="background:var(--s2);"><div><div class="scan-result-desc" style="font-size:15px;font-weight:700;">' + (r.comercio || 'Supermercado') + '</div><div class="scan-result-cat">' + catMain.icon + ' ' + catMain.name + ' · Total ticket</div></div><div class="scan-result-amt" style="font-size:17px;">' + (r.total ? fmt(r.total) : '—') + '</div></div>';
+    if (r.items && r.items.length > 0) r.items.forEach(item => { const catItem = CATS.find(c => c.id === item.cat) || catMain; html += '<div class="scan-result-item"><div><div class="scan-result-desc">' + item.desc + '</div><div class="scan-result-cat">' + catItem.icon + ' ' + catItem.name + '</div></div><div class="scan-result-amt" style="color:var(--muted);">' + fmt(item.monto) + '</div></div>'; });
+    if (r.notas) html += '<div style="padding:8px 16px;font-size:11px;color:var(--muted);">📝 ' + r.notas + '</div>';
   }
+
   document.getElementById('scan-result-rows').innerHTML = html;
   const ms = document.getElementById('scan-month-sel');
   ms.innerHTML = '';
@@ -2401,6 +2553,7 @@ function showScanResult() {
     ms.appendChild(opt);
   }
 }
+
 
 function confirmScanGasto() {
   const r = scanResult;
@@ -2612,7 +2765,17 @@ function renderSyncList() {
 
     const dateEl = document.createElement('div');
     dateEl.style.cssText = 'font-size:11px;color:var(--muted);flex-shrink:0;';
-    dateEl.textContent = m.fecha + (alreadyIn ? ' · ya importado' : '') + (m.nota ? ' · ' + m.nota : '');
+    const medioIcon = m.medio_pago === 'credito' ? '💳' : '💵';
+    let impLabel = '';
+    if (m.mes_impacto !== undefined) {
+      const impM = m.mes_impacto;
+      const impY = m.año_impacto;
+      const fechaD = new Date(m.fecha + 'T00:00:00');
+      if (impM !== fechaD.getMonth() || impY !== fechaD.getFullYear()) {
+        impLabel = ' → ' + MONTH_NAMES[impM].slice(0,3) + ' ' + impY;
+      }
+    }
+    dateEl.textContent = m.fecha + ' ' + medioIcon + impLabel + (alreadyIn ? ' · ya importado' : '') + (m.nota ? ' · ' + m.nota : '');
 
     const amt = document.createElement('div');
     amt.style.cssText = 'font-family:var(--font-display);font-size:14px;font-weight:700;white-space:nowrap;color:' + (isIncome ? 'var(--green)' : 'var(--red)') + ';margin-left:auto;';
@@ -2718,12 +2881,33 @@ function confirmSyncImport() {
     if (alreadyIn) return;
     const catFinal = syncCatEdits[key] || m.cat || 'otros';
     const descFinal = syncDescEdits[key] !== undefined && syncDescEdits[key].trim() ? syncDescEdits[key].trim() : m.desc;
-    state.transactions.push({
-      id: uid(), desc: descFinal, cat: catFinal,
-      amount: m.monto, type: 'Variable',
-      month, year, flow: m.tipo === 'ingreso' ? 'ingreso' : 'gasto',
-      cuotas: 1, cuota: 1
-    });
+    // Usar mes de impacto calculado por el script (crédito = mes siguiente)
+    const impMonth = (m.mes_impacto !== undefined) ? m.mes_impacto : month;
+    const impYear = (m.año_impacto !== undefined) ? m.año_impacto : year;
+    const numCuotas = m.cuotas > 1 ? m.cuotas : 1;
+    if (numCuotas > 1) {
+      // Generar una transacción por cuota
+      for (let ci = 0; ci < numCuotas; ci++) {
+        const d = new Date(impYear, impMonth + ci, 1);
+        state.transactions.push({
+          id: uid(), desc: descFinal + ' (' + (ci+1) + '/' + numCuotas + ')',
+          cat: catFinal, amount: Math.round(m.monto / numCuotas),
+          type: 'Cuotas', month: d.getMonth(), year: d.getFullYear(),
+          flow: 'gasto', cuotas: numCuotas, cuota: ci + 1,
+          medio_pago: m.medio_pago || 'debito'
+        });
+      }
+    } else {
+      state.transactions.push({
+        id: uid(), desc: descFinal, cat: catFinal,
+        amount: m.monto, type: m.medio_pago === 'credito' ? 'Fijo' : 'Variable',
+        month: impMonth, year: impYear,
+        flow: m.tipo === 'ingreso' ? 'ingreso' : 'gasto',
+        cuotas: 1, cuota: 1,
+        medio_pago: m.medio_pago || 'debito',
+        fuente: 'mp'
+      });
+    }
     imported++;
   });
 
