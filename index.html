@@ -712,6 +712,52 @@ body { font-family:var(--font-body); color:var(--text); display:flex; flex-direc
   </div>
 </div>
 
+<!-- SCREEN: TODAS LAS TRANSACCIONES -->
+<div class="screen" id="s-alltxns" style="height:100%;position:fixed;inset:0;z-index:50;background:var(--bg);">
+  <!-- Header fijo -->
+  <div style="flex-shrink:0;background:var(--bg);padding:env(safe-area-inset-top,0px) 0 0;">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 8px;">
+      <button onclick="goScreen('dash',document.querySelector('.nav-item'))" style="background:var(--s2);border:1px solid var(--border);color:var(--text);width:36px;height:36px;border-radius:10px;font-size:20px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;">‹</button>
+      <div style="font-family:var(--font-display);font-size:17px;font-weight:800;">📋 Todas las transacciones</div>
+    </div>
+    <div style="padding:0 16px 8px;">
+      <input class="form-input" id="alltxns-search" type="text" placeholder="🔍 Buscar descripción..." oninput="renderAllTxns()" style="font-size:14px;">
+    </div>
+    <div style="display:flex;gap:6px;padding:0 16px 8px;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+      <select class="form-input" id="alltxns-mes" onchange="renderAllTxns()" style="font-size:11px;padding:5px 8px;cursor:pointer;flex-shrink:0;">
+        <option value="all">Todos los meses</option>
+      </select>
+      <select class="form-input" id="alltxns-cat" onchange="renderAllTxns()" style="font-size:11px;padding:5px 8px;cursor:pointer;flex-shrink:0;">
+        <option value="all">Todas las cats.</option>
+      </select>
+      <select class="form-input" id="alltxns-tipo" onchange="renderAllTxns()" style="font-size:11px;padding:5px 8px;cursor:pointer;flex-shrink:0;">
+        <option value="all">Todos</option>
+        <option value="gasto">💸 Gastos</option>
+        <option value="ingreso">💰 Ingresos</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:8px;padding:0 16px 8px;">
+      <div style="flex:1;background:var(--red-dim);border:1px solid rgba(255,64,96,0.2);border-radius:10px;padding:7px 10px;text-align:center;">
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Egresos</div>
+        <div id="alltxns-total-g" style="font-family:var(--font-display);font-weight:800;font-size:14px;color:var(--red);">$0</div>
+      </div>
+      <div style="flex:1;background:var(--green-dim);border:1px solid rgba(0,245,160,0.2);border-radius:10px;padding:7px 10px;text-align:center;">
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Ingresos</div>
+        <div id="alltxns-total-i" style="font-family:var(--font-display);font-weight:800;font-size:14px;color:var(--green);">$0</div>
+      </div>
+      <div style="background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:7px 10px;text-align:center;flex-shrink:0;">
+        <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Items</div>
+        <div id="alltxns-count" style="font-family:var(--font-display);font-weight:800;font-size:13px;color:var(--muted);">0</div>
+      </div>
+    </div>
+    <div style="height:1px;background:var(--border);"></div>
+  </div>
+  <!-- Lista scrolleable -->
+  <div style="overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;padding-bottom:calc(var(--nav-h) + var(--safe-bottom) + 16px);">
+    <div id="alltxns-list"></div>
+  </div>
+</div>
+
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav">
   <button class="nav-item active" onclick="goScreen('dash',this)">
@@ -1718,20 +1764,80 @@ function deleteTxnConfirm(id) {
 }
 
 function showAllTxns() {
-  const el = document.getElementById('txn-list');
-  const d = calcMonth(state.currentM, state.currentY);
-  const all = [...d.txns.filter(t=>t.flow==='ingreso'), ...d.txns.filter(t=>t.flow==='gasto').sort((a,b)=>b.amount-a.amount)];
-  el.innerHTML = all.map(t => {
-    const cat = CATS.find(c=>c.id===t.cat)||{icon:'📦',color:'#666',name:t.cat};
-    const isIncome = t.flow==='ingreso';
-    return `<div class="txn-row" onclick="openTxnEdit('${t.id}')">
-      <div class="txn-ico" style="background:${cat.color}20;color:${cat.color};">${isIncome?'💰':cat.icon}</div>
-      <div class="txn-info">
-        <div class="txn-name">${t.desc}</div>
-        <div class="txn-cat">${cat.name} · ${t.type}${t.cuotas>1?' (cuota '+t.cuota+'/'+t.cuotas+')':''}</div>
-      </div>
-      <div class="txn-amt ${isIncome?'income':''}">${isIncome?'+':'-'}${fmt(t.amount)}</div>
-    </div>`;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+  document.getElementById('s-alltxns').classList.add('active');
+  initAllTxnsFilters();
+  renderAllTxns();
+}
+
+function renderAllTxns() {
+  const searchVal = (document.getElementById('alltxns-search')?.value || '').toLowerCase();
+  const filterCat = document.getElementById('alltxns-cat')?.value || 'all';
+  const filterTipo = document.getElementById('alltxns-tipo')?.value || 'all';
+  const filterMes = document.getElementById('alltxns-mes')?.value || 'all';
+
+  let txns = [...state.transactions];
+
+  // Filtros
+  if (filterCat !== 'all') txns = txns.filter(t => t.cat === filterCat);
+  if (filterTipo === 'gasto') txns = txns.filter(t => t.flow === 'gasto');
+  if (filterTipo === 'ingreso') txns = txns.filter(t => t.flow === 'ingreso');
+  if (filterMes !== 'all') {
+    const [y, m] = filterMes.split('-');
+    txns = txns.filter(t => t.year === parseInt(y) && t.month === parseInt(m));
+  }
+  if (searchVal) txns = txns.filter(t => t.desc.toLowerCase().includes(searchVal));
+
+  // Ordenar más reciente primero
+  txns.sort((a,b) => (b.year*12+b.month) - (a.year*12+a.month) || b.amount - a.amount);
+
+  const el = document.getElementById('alltxns-list');
+  if (!el) return;
+
+  // Totales
+  const totalGastos = txns.filter(t=>t.flow==='gasto').reduce((s,t)=>s+t.amount,0);
+  const totalIngresos = txns.filter(t=>t.flow==='ingreso').reduce((s,t)=>s+t.amount,0);
+  document.getElementById('alltxns-total-g').textContent = fmt(totalGastos);
+  document.getElementById('alltxns-total-i').textContent = fmt(totalIngresos);
+  document.getElementById('alltxns-count').textContent = txns.length + ' transacciones';
+
+  if (txns.length === 0) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">Sin resultados</div>';
+    return;
+  }
+
+  // Agrupar por mes
+  const grupos = {};
+  txns.forEach(t => {
+    const k = t.year + '-' + t.month;
+    if (!grupos[k]) grupos[k] = [];
+    grupos[k].push(t);
+  });
+
+  el.innerHTML = Object.keys(grupos).sort((a,b) => {
+    const [ay,am] = a.split('-'); const [by,bm] = b.split('-');
+    return (parseInt(by)*12+parseInt(bm)) - (parseInt(ay)*12+parseInt(am));
+  }).map(k => {
+    const [y, m] = k.split('-');
+    const list = grupos[k];
+    const mesTotal = list.filter(t=>t.flow==='gasto').reduce((s,t)=>s+t.amount,0);
+    return '<div style="padding:10px 16px 4px;display:flex;justify-content:space-between;align-items:center;background:var(--s2);border-bottom:1px solid var(--border);">' +
+      '<span style="font-family:var(--font-display);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);">' + MONTH_NAMES[parseInt(m)] + ' ' + y + '</span>' +
+      '<span style="font-size:11px;color:var(--red);">' + fmt(mesTotal) + '</span>' +
+      '</div>' +
+      list.map(t => {
+        const cat = CATS.find(c=>c.id===t.cat)||{icon:'📦',color:'#666',name:t.cat};
+        const isIncome = t.flow==='ingreso';
+        return '<div class="txn-row" onclick="openTxnEdit(\'' + t.id + '\')">' +
+          '<div class="txn-ico" style="background:' + cat.color + '20;color:' + cat.color + ';">' + (isIncome?'💰':cat.icon) + '</div>' +
+          '<div class="txn-info">' +
+            '<div class="txn-name">' + t.desc + '</div>' +
+            '<div class="txn-cat">' + cat.name + ' · ' + MONTH_NAMES[t.month].slice(0,3) + ' ' + t.year + (t.cuotas>1?' · '+t.cuota+'/'+t.cuotas:'') + '</div>' +
+          '</div>' +
+          '<div class="txn-amt ' + (isIncome?'income':'') + '">' + (isIncome?'+':'-') + fmt(t.amount) + '</div>' +
+        '</div>';
+      }).join('');
   }).join('');
 }
 
@@ -2068,6 +2174,7 @@ function saveTxnEdit() {
   renderDash();
   if (document.getElementById('s-proj').classList.contains('active')) renderProj();
   if (document.getElementById('s-prev').classList.contains('active')) renderPrev();
+  if (document.getElementById('s-alltxns').classList.contains('active')) renderAllTxns();
 }
 
 function deleteTxnFromEdit() {
@@ -2374,6 +2481,7 @@ function openSyncModal() {
   syncData = null;
   syncExcluded = new Set();
   syncCatEdits = {};
+  syncDescEdits = {};
   document.getElementById('sync-step1').style.display = 'block';
   document.getElementById('sync-step2').style.display = 'none';
   const inp = document.getElementById('sync-paste-input');
@@ -2446,6 +2554,9 @@ function renderSyncPreview() {
   renderSyncList();
 }
 
+// syncDescEdits: key → descripcion editada por el user
+let syncDescEdits = {};
+
 function renderSyncList() {
   const filterMes = document.getElementById('sync-month-filter')?.value || 'all';
   const filterTipo = document.getElementById('sync-tipo-filter')?.value || 'all';
@@ -2467,17 +2578,17 @@ function renderSyncList() {
   }
 
   el.innerHTML = '';
-  filtered.forEach((m, idx) => {
+  filtered.forEach((m) => {
     const key = m.fecha + '_' + (m.counterpart||m.desc) + '_' + m.monto;
     const catId = syncCatEdits[key] || m.cat || 'otros';
-    const cat = CATS.find(c => c.id === catId) || {icon:'📦', name:'Otros', id:'otros'};
     const isIncome = m.tipo === 'ingreso';
     const excluded = syncExcluded.has(key);
     const needsReview = m.needsReview && !syncCatEdits[key];
+    const descFinal = syncDescEdits[key] !== undefined ? syncDescEdits[key] : m.desc;
 
     const d = new Date(m.fecha);
     const alreadyIn = state.transactions.some(t =>
-      t.desc === m.desc && t.amount === m.monto &&
+      t.desc === (syncDescEdits[key] || m.desc) && t.amount === m.monto &&
       t.month === d.getMonth() && t.year === d.getFullYear()
     );
 
@@ -2487,39 +2598,56 @@ function renderSyncList() {
       (alreadyIn ? 'background:var(--green-dim);' : '') +
       'opacity:' + (excluded ? 0.35 : 1) + ';';
 
-    // Top row
+    // Fila superior: checkbox + monto
     const top = document.createElement('div');
-    top.style.cssText = 'display:flex;align-items:center;gap:10px;';
+    top.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:6px;';
 
     const chk = document.createElement('div');
-    chk.style.cssText = 'font-size:16px;flex-shrink:0;cursor:pointer;';
+    chk.style.cssText = 'font-size:18px;flex-shrink:0;cursor:pointer;';
     chk.textContent = excluded ? '☐' : alreadyIn ? '✅' : (needsReview ? '⚠️' : '☑');
     chk.onclick = () => {
       if (syncExcluded.has(key)) syncExcluded.delete(key); else syncExcluded.add(key);
       renderSyncList();
     };
 
-    const info = document.createElement('div');
-    info.style.cssText = 'flex:1;min-width:0;';
-    info.innerHTML = '<div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + m.desc + '</div>' +
-      (m.counterpart && m.counterpart !== m.desc ? '<div style="font-size:10px;color:var(--muted2);">' + m.counterpart + '</div>' : '') +
-      '<div style="font-size:11px;color:var(--muted);">' + m.fecha + (alreadyIn ? ' · ya importado' : '') + (m.nota ? ' · ' + m.nota : '') + '</div>';
+    const dateEl = document.createElement('div');
+    dateEl.style.cssText = 'font-size:11px;color:var(--muted);flex-shrink:0;';
+    dateEl.textContent = m.fecha + (alreadyIn ? ' · ya importado' : '') + (m.nota ? ' · ' + m.nota : '');
 
     const amt = document.createElement('div');
-    amt.style.cssText = 'font-family:var(--font-display);font-size:13px;font-weight:700;white-space:nowrap;color:' + (isIncome ? 'var(--green)' : 'var(--red)') + ';';
+    amt.style.cssText = 'font-family:var(--font-display);font-size:14px;font-weight:700;white-space:nowrap;color:' + (isIncome ? 'var(--green)' : 'var(--red)') + ';margin-left:auto;';
     amt.textContent = (isIncome ? '+' : '-') + fmt(m.monto);
 
     top.appendChild(chk);
-    top.appendChild(info);
+    top.appendChild(dateEl);
     top.appendChild(amt);
 
-    // Bottom row: selectors
+    // Descripción editable
+    const descInp = document.createElement('input');
+    descInp.type = 'text';
+    descInp.className = 'form-input';
+    descInp.value = descFinal;
+    descInp.placeholder = 'Descripción...';
+    descInp.style.cssText = 'font-size:13px;padding:7px 10px;margin-bottom:6px;' + (needsReview ? 'border-color:var(--yellow);' : '');
+    descInp.oninput = () => {
+      syncDescEdits[key] = descInp.value;
+    };
+    descInp.onblur = () => {
+      // Guardar aprendizaje: alias → descripcion + cat
+      if (m.counterpart && descInp.value) {
+        const rules = getMpRules();
+        rules[m.counterpart.toLowerCase().trim()] = syncCatEdits[key] || m.cat || 'otros';
+        lsSet('mp_rules', rules);
+      }
+    };
+
+    // Fila selectores
     const bottom = document.createElement('div');
-    bottom.style.cssText = 'margin-top:6px;display:flex;gap:6px;align-items:center;';
+    bottom.style.cssText = 'display:flex;gap:6px;align-items:center;';
 
     const catSel = document.createElement('select');
     catSel.className = 'form-input';
-    catSel.style.cssText = 'font-size:11px;padding:4px 8px;cursor:pointer;flex:1;' + (needsReview ? 'border-color:var(--yellow);' : '');
+    catSel.style.cssText = 'font-size:11px;padding:5px 8px;cursor:pointer;flex:1;' + (needsReview ? 'border-color:var(--yellow);' : '');
     CATS.forEach(c => {
       const opt = document.createElement('option');
       opt.value = c.id;
@@ -2530,12 +2658,11 @@ function renderSyncList() {
     catSel.onchange = () => {
       syncCatEdits[key] = catSel.value;
       if (m.counterpart) saveMpRule(m.counterpart, catSel.value);
-      renderSyncList();
     };
 
     const tipoSel = document.createElement('select');
     tipoSel.className = 'form-input';
-    tipoSel.style.cssText = 'font-size:11px;padding:4px 8px;cursor:pointer;width:auto;';
+    tipoSel.style.cssText = 'font-size:11px;padding:5px 8px;cursor:pointer;width:auto;';
     ['gasto','ingreso'].forEach(t => {
       const opt = document.createElement('option');
       opt.value = t;
@@ -2543,19 +2670,18 @@ function renderSyncList() {
       if (t === (isIncome ? 'ingreso' : 'gasto')) opt.selected = true;
       tipoSel.appendChild(opt);
     });
-    tipoSel.onchange = () => {
-      m.tipo = tipoSel.value;
-      renderSyncList();
-    };
+    tipoSel.onchange = () => { m.tipo = tipoSel.value; };
 
     bottom.appendChild(catSel);
     bottom.appendChild(tipoSel);
+
     row.appendChild(top);
+    row.appendChild(descInp);
     row.appendChild(bottom);
     el.appendChild(row);
   });
 
-  // Botón
+  // Botón contador
   const toImport = filtered.filter(m => {
     const key = m.fecha + '_' + (m.counterpart||m.desc) + '_' + m.monto;
     const d = new Date(m.fecha);
@@ -2566,7 +2692,7 @@ function renderSyncList() {
     return !syncExcluded.has(key) && !alreadyIn;
   }).length;
   const btn = document.getElementById('sync-confirm-btn');
-  if (btn) btn.textContent = toImport > 0 ? '✓ Importar ' + toImport + ' movimientos nuevos' : '✓ Todo actualizado';
+  if (btn) btn.textContent = toImport > 0 ? '✓ Importar ' + toImport + ' movimientos' : '✓ Todo actualizado';
 }
 
 function toggleSyncExclude(key) {
@@ -2591,8 +2717,9 @@ function confirmSyncImport() {
     );
     if (alreadyIn) return;
     const catFinal = syncCatEdits[key] || m.cat || 'otros';
+    const descFinal = syncDescEdits[key] !== undefined && syncDescEdits[key].trim() ? syncDescEdits[key].trim() : m.desc;
     state.transactions.push({
-      id: uid(), desc: m.desc, cat: catFinal,
+      id: uid(), desc: descFinal, cat: catFinal,
       amount: m.monto, type: 'Variable',
       month, year, flow: m.tipo === 'ingreso' ? 'ingreso' : 'gasto',
       cuotas: 1, cuota: 1
@@ -2625,6 +2752,32 @@ function showToast(msg) {
   document.body.appendChild(t);
   setTimeout(() => t.style.opacity = '0', 2000);
   setTimeout(() => t.remove(), 2500);
+}
+
+function initAllTxnsFilters() {
+  // Meses
+  const mesSel = document.getElementById('alltxns-mes');
+  if (!mesSel || mesSel.options.length > 1) return;
+  const meses = [...new Set(state.transactions.map(t => t.year + '-' + t.month))].sort((a,b) => {
+    const [ay,am]=a.split('-'); const [by,bm]=b.split('-');
+    return (parseInt(by)*12+parseInt(bm))-(parseInt(ay)*12+parseInt(am));
+  });
+  meses.forEach(k => {
+    const [y,m] = k.split('-');
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = MONTH_NAMES[parseInt(m)] + ' ' + y;
+    mesSel.appendChild(opt);
+  });
+  // Categorías
+  const catSel = document.getElementById('alltxns-cat');
+  if (!catSel || catSel.options.length > 1) return;
+  CATS.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.icon + ' ' + c.name;
+    catSel.appendChild(opt);
+  });
 }
 
 // ── PWA INSTALL ──
