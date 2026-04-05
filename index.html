@@ -914,8 +914,10 @@ body { font-family:var(--font-body); color:var(--text); display:flex; flex-direc
     <div style="padding:0 20px;">
       <button class="submit-btn" onclick="saveSettings()">Guardar</button>
     </div>
-    <div style="padding:16px 20px 0; text-align:center;">
-      <div style="font-size:12px;color:var(--muted);cursor:pointer;" onclick="exportData()">📤 Exportar datos (JSON)</div>
+    <div style="padding:16px 20px 0; display:flex; flex-direction:column; gap:10px;">
+      <div style="font-size:12px;color:var(--muted);cursor:pointer;text-align:center;" onclick="exportData()">📤 Exportar datos (JSON)</div>
+      <label style="font-size:12px;color:var(--blue);cursor:pointer;text-align:center;" for="import-file-input">📥 Importar backup (JSON)</label>
+      <input type="file" id="import-file-input" accept=".json" style="display:none;" onchange="importBackup(event)">
     </div>
     <div style="height:16px;"></div>
   </div>
@@ -1964,6 +1966,32 @@ function saveSettings() {
   renderDash();
   renderMetas();
 }
+function importBackup(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.transactions) throw new Error('Formato inválido');
+      if (!confirm('¿Reemplazar todos los datos con el backup? Esto no se puede deshacer.')) return;
+      lsSet('txns', data.transactions);
+      if (data.goals) lsSet('goals', data.goals);
+      if (data.config) lsSet('cfg', data.config);
+      state.transactions = data.transactions;
+      state.goals = data.goals || [];
+      state.config = data.config || state.config;
+      closeModals();
+      renderDash();
+      renderMetas();
+      showToast('✓ Backup importado — ' + data.transactions.length + ' transacciones');
+    } catch(err) {
+      alert('Error al importar: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
 function exportData() {
   const blob = new Blob([JSON.stringify({transactions:state.transactions,goals:state.goals,config:state.config},null,2)],{type:'application/json'});
   const a = document.createElement('a');
