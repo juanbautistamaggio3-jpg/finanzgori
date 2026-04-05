@@ -2907,10 +2907,38 @@ function renderSyncList() {
 
     bottom.appendChild(catSel);
     bottom.appendChild(tipoSel);
-
     row.appendChild(top);
     row.appendChild(descInp);
     row.appendChild(bottom);
+
+    // Selector de cuotas — solo para crédito y gastos
+    if (m.medio_pago === 'credito' && !isIncome) {
+      const cuotasWrap = document.createElement('div');
+      cuotasWrap.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:5px;';
+
+      const cuotasLbl = document.createElement('span');
+      cuotasLbl.style.cssText = 'font-size:11px;color:var(--muted);flex-shrink:0;';
+      cuotasLbl.textContent = '💳 Cuotas:';
+
+      const cuotasSel = document.createElement('select');
+      cuotasSel.className = 'form-input';
+      cuotasSel.style.cssText = 'font-size:11px;padding:5px 8px;cursor:pointer;flex:1;';
+      // 1 a 24 de a 1, luego 30, 36, 48, 60, 72, 84, 100
+      const cuotaOpts = [...Array.from({length:24},(_,i)=>i+1), 30,36,48,60,72,84,100];
+      cuotaOpts.forEach(n => {
+        const opt = document.createElement('option');
+        opt.value = n;
+        opt.textContent = n === 1 ? '1 cuota (mes siguiente)' : n + ' cuotas';
+        if (n === (m.cuotas || 1)) opt.selected = true;
+        cuotasSel.appendChild(opt);
+      });
+      cuotasSel.onchange = () => { m.cuotas = parseInt(cuotasSel.value); };
+
+      cuotasWrap.appendChild(cuotasLbl);
+      cuotasWrap.appendChild(cuotasSel);
+      row.appendChild(cuotasWrap);
+    }
+
     el.appendChild(row);
   });
 
@@ -2951,29 +2979,49 @@ function confirmSyncImport() {
     if (alreadyIn) return;
     const catFinal = syncCatEdits[key] || m.cat || 'otros';
     const descFinal = syncDescEdits[key] !== undefined && syncDescEdits[key].trim() ? syncDescEdits[key].trim() : m.desc;
-    // Usar mes de impacto calculado por el script (crédito = mes siguiente)
     const impMonth = (m.mes_impacto !== undefined) ? m.mes_impacto : month;
     const impYear = (m.año_impacto !== undefined) ? m.año_impacto : year;
-    const numCuotas = m.cuotas > 1 ? m.cuotas : 1;
-    if (numCuotas > 1) {
-      // Generar una transacción por cuota
+    const numCuotas = (m.cuotas && m.cuotas > 1) ? m.cuotas : 1;
+    const isIngreso = m.tipo === 'ingreso';
+
+    if (numCuotas > 1 && !isIngreso) {
+      // Generar una transacción por cada cuota en meses consecutivos
+      const montoCuota = Math.round(m.monto / numCuotas);
       for (let ci = 0; ci < numCuotas; ci++) {
         const d = new Date(impYear, impMonth + ci, 1);
-        state.transactions.push({
-          id: uid(), desc: descFinal + ' (' + (ci+1) + '/' + numCuotas + ')',
-          cat: catFinal, amount: Math.round(m.monto / numCuotas),
-          type: 'Cuotas', month: d.getMonth(), year: d.getFullYear(),
-          flow: 'gasto', cuotas: numCuotas, cuota: ci + 1,
-          medio_pago: m.medio_pago || 'debito'
-        });
+        const alreadyExists = state.transactions.some(t =>
+          t.desc === descFinal + ' (' + (ci+1) + '/' + numCuotas + ')' &&
+          t.month === d.getMonth() && t.year === d.getFullYear()
+        );
+        if (!alreadyExists) {
+          state.transactions.push({
+            id: uid(),
+            desc: descFinal + ' (' + (ci+1) + '/' + numCuotas + ')',
+            cat: catFinal,
+            amount: montoCuota,
+            type: 'Cuotas',
+            month: d.getMonth(),
+            year: d.getFullYear(),
+            flow: 'gasto',
+            cuotas: numCuotas,
+            cuota: ci + 1,
+            medio_pago: 'credito',
+            fuente: 'mp'
+          });
+        }
       }
     } else {
       state.transactions.push({
-        id: uid(), desc: descFinal, cat: catFinal,
-        amount: m.monto, type: m.medio_pago === 'credito' ? 'Fijo' : 'Variable',
-        month: impMonth, year: impYear,
-        flow: m.tipo === 'ingreso' ? 'ingreso' : 'gasto',
-        cuotas: 1, cuota: 1,
+        id: uid(),
+        desc: descFinal,
+        cat: catFinal,
+        amount: m.monto,
+        type: m.medio_pago === 'credito' ? 'Variable' : 'Variable',
+        month: impMonth,
+        year: impYear,
+        flow: isIngreso ? 'ingreso' : 'gasto',
+        cuotas: 1,
+        cuota: 1,
         medio_pago: m.medio_pago || 'debito',
         fuente: 'mp'
       });
