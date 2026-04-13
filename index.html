@@ -2456,7 +2456,11 @@ function processPastedJSON() {
   let raw = document.getElementById('scan-paste-input').value.trim();
   if (!raw) return;
   try {
+    raw = raw.replace(/<[^>]*>/g, '');
     raw = raw.replace(/```json|```/g,'').trim();
+    raw = raw.replace(/[​-‍﻿ ]/g, ' ');
+    raw = raw.replace(/&quot;/g,'"').replace(/&amp;/g,'&');
+    raw = raw.trim();
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
     if (start === -1 || end === -1) throw new Error('No se encontro JSON');
@@ -2728,10 +2732,19 @@ function resetSyncModal() {
 }
 
 function processSyncJSON() {
-  const raw = (document.getElementById('sync-paste-input')?.value || '').trim();
+  let raw = (document.getElementById('sync-paste-input')?.value || '').trim();
   if (!raw) { alert('Pegá el JSON primero.'); return; }
+  // Limpiar HTML, markdown y caracteres especiales de Android/Chrome
+  raw = raw.replace(/<[^>]*>/g, '');
+  raw = raw.replace(/```json|```/g, '');
+  raw = raw.replace(/[​-‍﻿ ]/g, ' ');
+  raw = raw.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+  raw = raw.trim();
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start !== -1 && end !== -1) raw = raw.slice(start, end + 1);
   let data;
-  try { data = JSON.parse(raw.replace(/^[^{[]*/,'')); } catch(e) { alert('Texto inválido. Copiá exactamente lo que devolvió el link.'); return; }
+  try { data = JSON.parse(raw); } catch(e) { alert('Texto inválido: ' + e.message + '\n\nAsegurate de copiar todo el contenido de la página.'); return; }
   if (!data.ok) { alert('Error: ' + (data.error || data.debug || 'Sin movimientos')); return; }
   syncData = data.movimientos || [];
   syncData.forEach(m => {
